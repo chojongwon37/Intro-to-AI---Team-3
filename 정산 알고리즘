@@ -177,3 +177,29 @@ def calculate():
     result_text = format_results(participants_dict, items_list, transfers)
     
     return result_text
+
+state["participants"] = [
+    {"name": "김철수", "bank": "신한", "account": "110-123"},
+    {"name": "이영희", "bank": "국민", "account": "222-333"},
+    {"name": "박민수", "bank": "", "account": ""}
+]
+
+state["items"] = [
+    {
+        "id": 1,
+        "name": "치킨",
+        "cost": 30000,
+        "payer_name": "김철수",
+        "participant_names": ["김철수", "이영희", "박민수"]
+    },
+    {
+        "id": 2,
+        "name": "카페",
+        "cost": 15000,
+        "payer_name": "이영희",
+        "participant_names": ["김철수", "이영희"]
+    }
+]
+
+result = calculate()
+print(result)
