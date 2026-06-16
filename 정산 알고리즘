@@ -1,0 +1,179 @@
+# -*- coding: utf-8 -*-
+"""
+📊 N빵 정산 계산기 (Dutch Pay Splitter) - GUI 버전
+"""
+
+import sys
+import os
+
+# 현재 경로를 sys.path에 추가하여 bill_splitter 임포트 지원
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+try:
+    from bill_splitter import Participant, Item, calculate_dutch_pay, format_results
+except ImportError:
+    # 예외 상황 대비 백업용 로컬 클래스 및 알고리즘 정의
+    class Participant:
+        def __init__(self, name, bank=None, account_number=None):
+            self.name = name
+            self.bank = bank
+            self.account_number = account_number
+        def __repr__(self):
+            account_str = f" ({self.bank} {self.account_number})" if self.bank and self.account_number else ""
+            return f"{self.name}{account_str}"
+
+    class Item:
+        def __init__(self, name, cost, payer_name, participant_names):
+            self.name = name
+            self.cost = cost
+            self.payer_name = payer_name
+            self.participant_names = list(participant_names)
+
+    def calculate_dutch_pay(participants_dict, items, rounding_unit=1):
+        balances = {name: 0.0 for name in participants_dict.keys()}
+        for item in items:
+            num_participants = len(item.participant_names)
+            if num_participants == 0:
+                continue
+            split_cost = item.cost / num_participants
+            balances[item.payer_name] += item.cost
+            for p_name in item.participant_names:
+                if p_name in balances:
+                    balances[p_name] -= split_cost
+
+        if rounding_unit > 1:
+            for name in balances:
+                balances[name] = round(balances[name])
+                balances[name] = (balances[name] // rounding_unit) * rounding_unit
+
+        creditors = []
+        debtors = []
+        for name, bal in balances.items():
+            if bal > 0.1:
+                creditors.append({"name": name, "balance": bal})
+            elif bal < -0.1:
+                debtors.append({"name": name, "balance": -bal})
+
+        creditors.sort(key=lambda x: x["balance"], reverse=True)
+        debtors.sort(key=lambda x: x["balance"], reverse=True)
+
+        transfers = []
+        c_idx, d_idx = 0, 0
+        while c_idx < len(creditors) and d_idx < len(debtors):
+            creditor = creditors[c_idx]
+            debtor = debtors[d_idx]
+            transfer_amount = min(debtor["balance"], creditor["balance"])
+            if rounding_unit > 1:
+                transfer_amount = (round(transfer_amount) // rounding_unit) * rounding_unit
+            if transfer_amount > 0:
+                transfers.append({
+                    "from": debtor["name"],
+                    "to": creditor["name"],
+                    "amount": transfer_amount
+                })
+            debtor["balance"] -= transfer_amount
+            creditor["balance"] -= transfer_amount
+            if debtor["balance"] < 0.1:
+                d_idx += 1
+            if creditor["balance"] < 0.1:
+                c_idx += 1
+        return balances, transfers
+
+    def format_results(participants_dict, items, transfers):
+        output = []
+        output.append("━" * 20)
+        output.append("📊 [정산 결과 공유] 📊")
+        output.append("━" * 20)
+        output.append("\n📝 [품목별 상세 내역]")
+        for i, item in enumerate(items, 1):
+            num_p = len(item.participant_names)
+            split_val = item.cost / num_p if num_p > 0 else 0
+            output.append(f"{i}. {item.name}: {item.cost:,.0f}원 (선결제: {item.payer_name})")
+            output.append(f"   └ 참여({num_p}명): {', '.join(item.participant_names)}")
+            output.append(f"   └ 1인당 금액: {split_val:,.0f}원")
+        output.append("\n💸 [송금 및 정산 내역]")
+        if not transfers:
+            output.append("이체할 내역이 없습니다. (정산 완료)")
+        else:
+            for t in transfers:
+                sender = t["from"]
+                receiver = t["to"]
+                amount = t["amount"]
+                receiver_obj = participants_dict[receiver]
+                account_info = ""
+                if receiver_obj.bank and receiver_obj.account_number:
+                    account_info = f" ({receiver_obj.bank} {receiver_obj.account_number})"
+                output.append(f"👉 {sender} ➔ {receiver}: {amount:,.0f}원{account_info}")
+        output.append("\n💡 빠르고 정확한 송금 부탁드립니다! 💡")
+        output.append("━" * 20)
+        return "\n".join(output)
+
+# ----------------- 앱 상태(State) -----------------
+state = {
+    "participants": [],  # Array of {"name": str, "bank": str, "account": str}
+    "items": [],         # Array of {"id": int, "name": str, "cost": int, "payer_name": str, "participant_names": list[str]}
+    "item_counter": 0
+}
+
+# ----------------- UI 헬퍼 컴포넌트 -----------------
+
+def delete_participant(name):
+    # 참여자 목록에서 제외
+    state["participants"] = [p for p in state["participants"] if p["name"] != name]
+    
+    # 품목 데이터에서도 제외
+    for item in state["items"]:
+        if name in item["participant_names"]:
+            item["participant_names"].remove(name)
+        if item["payer_name"] == name:
+            item["payer_name"] = ""  # 결제자 비움
+            
+
+
+
+def delete_item(item_id):
+    state["items"] = [item for item in state["items"] if item["id"] != item_id]
+
+
+def toggle_item_participant(item_id, p_name):
+    for item in state["items"]:
+        if item["id"] == item_id:
+            if p_name in item["participant_names"]:
+                item["participant_names"].remove(p_name)
+            else:
+                item["participant_names"].append(p_name)
+            break
+    
+
+
+def calculate():
+    if not state["participants"]:
+        return
+        
+    if not state["items"]:
+        return
+        
+    # 결제자 비어있는 품목 있는지 검사
+    for item in state["items"]:
+        if not item["payer_name"]:
+            return
+            
+    # 정산 로직 구동용 데이터 객체 매핑
+    participants_dict = {
+        p["name"]: Participant(p["name"], p["bank"], p["account"])
+        for p in state["participants"]
+    }
+    
+    items_list = [
+        Item(item["name"], item["cost"], item["payer_name"], item["participant_names"])
+        for item in state["items"]
+    ]
+    
+    rounding_unit = 10
+    
+    # 송금 최소화 연산 실행
+    balances, transfers = calculate_dutch_pay(participants_dict, items_list, rounding_unit)
+    
+    # 텍스트 포맷팅
+    result_text = format_results(participants_dict, items_list, transfers)
+    
+    return result_text
