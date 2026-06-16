@@ -318,5 +318,16 @@ result_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 text_area = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, font=("Consolas", 10), bg="#ffffff", fg="#212529", borderwidth=1, relief=tk.SOLID)
 text_area.pack(fill=tk.BOTH, expand=True)
 text_area.insert(tk.END, "왼쪽에서 실전 데이터를 등록한 뒤 정산서 생성 버튼을 누르세요.")
-
+def safe_clipboard_copy():
+    content = text_area.get("1.0", tk.END).strip()
+    if content == "왼쪽에서 실전 데이터를 등록한 뒤 정산서 생성 버튼을 누르세요.":
+        return
+        
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(content)
+        root.update()
+    except Exception as e:
+        print(f"클립보드 복사 내부 오류 발생: {e}")
+root.after(100, lambda: btn_calc.config(command=lambda: [generate_output(), safe_clipboard_copy()]))
 root.mainloop()
