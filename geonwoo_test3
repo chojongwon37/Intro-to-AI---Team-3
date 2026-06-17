@@ -1,10 +1,9 @@
-!apt-get update
-!apt-get install -y tesseract-ocr
-!apt-get install -y tesseract-ocr-kor
-!pip install pytesseract pandas opencv-python-headless openpyxl
-#--------------------------------
-!pip install easyocr pandas openpyxl opencv-python-headless
-#--------------------------------
+#터미널 창에 입력
+pip install easyocr opencv-python pandas numpy
+--------------------
+#터미널 창에 입력
+pip install openpyxl
+--------------------
 import easyocr
 import cv2
 import pandas as pd
@@ -12,28 +11,46 @@ import numpy as np
 import re
 import torch
 import os
+import tkinter as tk
+from tkinter import filedialog
 
-# 1. EasyOCR 로드 (GPU 사용 가능 시 자동 감지)
+# 1. EasyOCR 로드
 use_gpu = torch.cuda.is_available()
 print(f"GPU 가속 사용 여부: {use_gpu}")
 reader = easyocr.Reader(['ko', 'en'], gpu=use_gpu)
 
-# 2. 로컬 파일 경로 입력받기
-image_path = input("영수증 이미지 파일 경로를 입력하세요 (예: C:/receipt.jpg): ").strip().replace('"', '')
+# 2. 파일 탐색기(GUI)를 통해 이미지 파일 선택받기
+print("\n파일 선택 창을 띄웁니다. 영수증 이미지를 선택해 주세요...")
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
 
-if not os.path.exists(image_path):
-    print("파일을 찾을 수 없습니다. 경로를 다시 확인해주세요.")
+image_path = filedialog.askopenfilename(
+    title="영수증 이미지 파일 선택",
+    filetypes=[("Image Files", "*.jpg;*.jpeg;*.png;*.bmp"), ("All Files", "*.*")]
+)
+
+if not image_path or not os.path.exists(image_path):
+    print("파일이 선택되지 않았거나 찾을 수 없습니다. 프로그램을 종료합니다.")
     exit()
 
+print(f"선택된 파일: {image_path}")
+
 # 3. 이미지 읽기 및 해상도 최적화
-img = cv2.imread(image_path)
+img_array = np.fromfile(image_path, np.uint8)
+img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+if img is None:
+    print("이미지를 불러오는 데 실패했습니다.")
+    exit()
+
 img_resized = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
 
 # 4. EasyOCR 수행
 print("\n[글자 및 위치 분석 중...]")
 ocr_results = reader.readtext(img_resized)
 
-# 5. [좌표 기반 정렬 로직] (기존과 동일)
+# 5. [좌표 기반 정렬 로직]
 lines = []
 for box, text, prob in ocr_results:
     y_center = (box[0][1] + box[2][1]) / 2  
@@ -91,7 +108,6 @@ for row in grouped_rows:
         product_name = re.sub(r'^[=\-_※\*\s\.\+~:★▶\[\]\(\)]+|[=\-_※\*\s\.\+~:★▶\[\]\(\)]+$', '', " ".join(name_tokens)).strip()
         if not product_name or product_name.isdigit() or len(product_name) < 2: continue
         
-        # 숫자 정제 (3개: 단가, 수량, 금액 / 2개: 단가, 금액 / 1개: 금액)
         if len(num_tokens) == 3: unit_price, quantity, price = num_tokens
         elif len(num_tokens) == 2:
             v1, v2 = num_tokens
@@ -109,13 +125,20 @@ if parsed_data:
     df.loc[len(df)] = ['', '', '', '']
     df.loc[len(df)] = ['합계 금액', '', '', final_total]
     
-    # 판다스 표 출력
     print("\n[인식 결과]")
     print(df)
     
-    # 로컬 경로에 엑셀 저장
-    save_path = "receipt_result.xlsx"
-    df.to_excel(save_path, index=False)
-    print(f"\n성공! 결과 파일이 다음 경로에 저장되었습니다: {os.path.abspath(save_path)}")
+    # 영수증 이미지가 있는 폴더에 엑셀 파일을 만듭니다.
+    folder_path = os.path.dirname(os.path.abspath(image_path))
+    save_path = os.path.join(folder_path, "receipt_result.xlsx")
+    
+    try:
+        df.to_excel(save_path, index=False, engine='openpyxl')
+        print(f"\n✅ 성공! 엑셀 파일이 다음 경로에 저장되었습니다:")
+        print(f"👉 {save_path}")
+    except PermissionError:
+        print("\n[오류] 엑셀 파일이 이미 열려 있습니다! 엑셀 창을 닫고 다시 실행해주세요.")
+    except Exception as e:
+        print(f"\n[오류] 저장 중 문제가 발생했습니다: {e}")
 else:
     print("\n데이터를 추출하지 못했습니다. 이미지의 선명도를 확인해주세요.")
