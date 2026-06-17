@@ -1,0 +1,121 @@
+!apt-get update
+!apt-get install -y tesseract-ocr
+!apt-get install -y tesseract-ocr-kor
+!pip install pytesseract pandas opencv-python-headless openpyxl
+#--------------------------------
+!pip install easyocr pandas openpyxl opencv-python-headless
+#--------------------------------
+import easyocr
+import cv2
+import pandas as pd
+import numpy as np
+import re
+import torch
+import os
+
+# 1. EasyOCR 로드 (GPU 사용 가능 시 자동 감지)
+use_gpu = torch.cuda.is_available()
+print(f"GPU 가속 사용 여부: {use_gpu}")
+reader = easyocr.Reader(['ko', 'en'], gpu=use_gpu)
+
+# 2. 로컬 파일 경로 입력받기
+image_path = input("영수증 이미지 파일 경로를 입력하세요 (예: C:/receipt.jpg): ").strip().replace('"', '')
+
+if not os.path.exists(image_path):
+    print("파일을 찾을 수 없습니다. 경로를 다시 확인해주세요.")
+    exit()
+
+# 3. 이미지 읽기 및 해상도 최적화
+img = cv2.imread(image_path)
+img_resized = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+
+# 4. EasyOCR 수행
+print("\n[글자 및 위치 분석 중...]")
+ocr_results = reader.readtext(img_resized)
+
+# 5. [좌표 기반 정렬 로직] (기존과 동일)
+lines = []
+for box, text, prob in ocr_results:
+    y_center = (box[0][1] + box[2][1]) / 2  
+    height = box[2][1] - box[0][1]          
+    x_start = box[0][0]                     
+    lines.append({'text': text.strip(), 'y': y_center, 'h': height, 'x': x_start})
+
+lines = sorted(lines, key=lambda x: x['y'])
+grouped_rows = []
+if lines:
+    current_row = [lines[0]]
+    for line in lines[1:]:
+        ref_line = current_row[0]
+        threshold = max(ref_line['h'], line['h']) * 0.6
+        if abs(line['y'] - ref_line['y']) < threshold:
+            current_row.append(line)
+        else:
+            grouped_rows.append(current_row)
+            current_row = [line]
+    grouped_rows.append(current_row)
+
+# 6. 데이터 파싱
+parsed_data = []
+ocr_total_amount = None
+total_keywords = ['합계', 'TOTAL', '총금액', '총액', '결제금액', '받을금액', '받은금액', '발물', '룹액', '발물룹액']
+exclude_keywords = ['매장', '매장명', '사업자', '주소', '대표', '번호', '전화', 'TEL', '일시', '부가세', 'VAT', '과세', '면세', '거스름돈', '승인', '고객', '안내', '원', '영수증', '가맹점']
+
+for row in grouped_rows:
+    sorted_row = sorted(row, key=lambda x: x['x'])
+    row_text = " ".join([item['text'] for item in sorted_row])
+    cleaned_text_for_check = row_text.replace(" ", "")
+    
+    if any(k in cleaned_text_for_check for k in total_keywords):
+        for item in reversed(sorted_row):
+            num_check = re.sub(r'[^0-9]', '', item['text'])
+            if num_check and int(num_check) > 100: 
+                ocr_total_amount = int(num_check)
+                break
+        continue 
+    
+    if any(k in cleaned_text_for_check for k in ['단가', '수량', '금액', '품명']): continue
+    if any(k in cleaned_text_for_check for k in exclude_keywords): continue
+
+    num_tokens = []
+    name_tokens = []
+    for item in reversed(sorted_row):
+        t_text = item['text']
+        digit_only = re.sub(r'[^0-9]', '', t_text)
+        if digit_only and (any(c.isdigit() for c in t_text) and len(num_tokens) < 3):
+            num_tokens.insert(0, int(digit_only))
+        else:
+            name_tokens.insert(0, t_text)
+            
+    if name_tokens and num_tokens:
+        product_name = re.sub(r'^[=\-_※\*\s\.\+~:★▶\[\]\(\)]+|[=\-_※\*\s\.\+~:★▶\[\]\(\)]+$', '', " ".join(name_tokens)).strip()
+        if not product_name or product_name.isdigit() or len(product_name) < 2: continue
+        
+        # 숫자 정제 (3개: 단가, 수량, 금액 / 2개: 단가, 금액 / 1개: 금액)
+        if len(num_tokens) == 3: unit_price, quantity, price = num_tokens
+        elif len(num_tokens) == 2:
+            v1, v2 = num_tokens
+            if v1 < 100: quantity, price = v1, v2; unit_price = price // quantity if quantity > 0 else 0
+            else: unit_price = v1; price = v2; quantity = price // unit_price if unit_price > 0 else 1
+        else: price = num_tokens[0]; unit_price = price; quantity = 1
+            
+        if quantity > 1000 or price > 10000000 or unit_price > 10000000: continue
+        parsed_data.append({'상품명': product_name, '단가': unit_price, '수량': quantity, '금액': price})
+
+# 7. 출력 및 저장
+if parsed_data:
+    df = pd.DataFrame(parsed_data)
+    final_total = ocr_total_amount if ocr_total_amount else df['금액'].sum()
+    df.loc[len(df)] = ['', '', '', '']
+    df.loc[len(df)] = ['합계 금액', '', '', final_total]
+    
+    # 판다스 표 출력
+    print("\n[인식 결과]")
+    print(df)
+    
+    # 로컬 경로에 엑셀 저장
+    save_path = "receipt_result.xlsx"
+    df.to_excel(save_path, index=False)
+    print(f"\n성공! 결과 파일이 다음 경로에 저장되었습니다: {os.path.abspath(save_path)}")
+else:
+    print("\n데이터를 추출하지 못했습니다. 이미지의 선명도를 확인해주세요.")
