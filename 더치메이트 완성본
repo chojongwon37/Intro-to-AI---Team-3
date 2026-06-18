@@ -5,17 +5,237 @@ pip install easyocr opencv-python pandas numpy
 pip install openpyxl
 --------------------
 
-import sys
-import os
-import easyocr
-import cv2
-import pandas as pd
-import numpy as np
-import re
-import torch
+# -*- coding: utf-8 -*-
+"""
+더치메이트 정산 알고리즘 파트
+담당: 정산 알고리즘 / 최소 송금 횟수 계산
+"""
+
+# =========================
+# 데이터 클래스
+# =========================
+
+class Participant:
+    def __init__(self, name, bank=None, account_number=None):
+        self.name = name
+        self.bank = bank
+        self.account_number = account_number
+
+    def __repr__(self):
+        account_info = ""
+        if self.bank and self.account_number:
+            account_info = f" ({self.bank} {self.account_number})"
+        return f"{self.name}{account_info}"
+
+
+class Item:
+    def __init__(self, name, cost, payer_name, participant_names):
+        self.name = name
+        self.cost = cost
+        self.payer_name = payer_name
+        self.participant_names = list(participant_names)
+
+
+# =========================
+# 참여자 관리
+# =========================
+
+def add_participant(participants_dict, name, bank=None, account_number=None):
+    if name in participants_dict:
+        return False
+
+    participants_dict[name] = Participant(name, bank, account_number)
+    return True
+
+
+def delete_participant(participants_dict, items_list, name):
+    if name not in participants_dict:
+        return False
+
+    del participants_dict[name]
+
+    for item in items_list:
+        if name in item.participant_names:
+            item.participant_names.remove(name)
+
+        if item.payer_name == name:
+            item.payer_name = None
+
+    return True
+
+
+# =========================
+# 품목 관리
+# =========================
+
+def add_item(items_list, name, cost, payer_name, participant_names):
+    item = Item(name, cost, payer_name, participant_names)
+    items_list.append(item)
+    return True
+
+
+def delete_item(items_list, index):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list.pop(index)
+    return True
+
+
+def update_item_price(items_list, index, new_cost):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].cost = new_cost
+    return True
+
+
+def update_item_payer(items_list, index, new_payer_name):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].payer_name = new_payer_name
+    return True
+
+
+def update_item_participants(items_list, index, new_participant_names):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].participant_names = list(new_participant_names)
+    return True
+
+
+# =========================
+# 정산 계산 알고리즘
+# =========================
+
+def calculate_dutch_pay(participants_dict, items_list, rounding_unit=10):
+    balances = {}
+
+    for name in participants_dict:
+        balances[name] = 0
+
+    for item in items_list:
+        cost = item.cost
+        payer = item.payer_name
+        members = item.participant_names
+
+        if payer is None:
+            continue
+
+        if payer not in balances:
+            continue
+
+        valid_members = []
+
+        for member in members:
+            if member in balances:
+                valid_members.append(member)
+
+        if len(valid_members) == 0:
+            continue
+
+        split_cost = cost / len(valid_members)
+
+        balances[payer] += cost
+
+        for member in valid_members:
+            balances[member] -= split_cost
+
+    if rounding_unit > 1:
+        for name in balances:
+            balances[name] = round(balances[name] / rounding_unit) * rounding_unit
+
+    transfers = calculate_min_transfers(balances)
+
+    return balances, transfers
+
+
+# =========================
+# 최소 송금 횟수 계산
+# =========================
+
+def calculate_min_transfers(balances):
+    debtors = []
+    creditors = []
+
+    for name, balance in balances.items():
+        if balance < 0:
+            debtors.append([name, -balance])
+        elif balance > 0:
+            creditors.append([name, balance])
+
+    transfers = []
+
+    i = 0
+    j = 0
+
+    while i < len(debtors) and j < len(creditors):
+        debtor_name, debt_amount = debtors[i]
+        creditor_name, credit_amount = creditors[j]
+
+        send_amount = min(debt_amount, credit_amount)
+
+        transfers.append({
+            "from": debtor_name,
+            "to": creditor_name,
+            "amount": int(send_amount)
+        })
+
+        debtors[i][1] -= send_amount
+        creditors[j][1] -= send_amount
+
+        if debtors[i][1] <= 0:
+            i += 1
+
+        if creditors[j][1] <= 0:
+            j += 1
+
+    return transfers
+
+
+# =========================
+# 결과 출력용 함수
+# =========================
+
+def format_results(participants_dict, balances, transfers):
+    result = ""
+
+    result += "개인별 정산 결과\n"
+    result += "--------------------\n"
+
+    for name, balance in balances.items():
+        if balance > 0:
+            result += f"{name}: {int(balance)}원 받아야 함\n"
+        elif balance < 0:
+            result += f"{name}: {int(abs(balance))}원 보내야 함\n"
+        else:
+            result += f"{name}: 정산 완료\n"
+
+    result += "\n송금 내역\n"
+    result += "--------------------\n"
+
+    if not transfers:
+        result += "송금할 내역이 없습니다.\n"
+    else:
+        for transfer in transfers:
+            sender = transfer["from"]
+            receiver = transfer["to"]
+            amount = transfer["amount"]
+
+            receiver_info = participants_dict.get(receiver)
+
+            if receiver_info and receiver_info.bank and receiver_info.account_number:
+                result += f"{sender} → {receiver}: {amount}원 "
+                result += f"({receiver_info.bank} {receiver_info.account_number})\n"
+            else:
+                result += f"{sender} → {receiver}: {amount}원\n"
+
+    return result
+
 import tkinter as tk
-from tkinter import filedialog
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext, filedialog
 import urllib.parse
 
 try:
@@ -23,145 +243,112 @@ try:
 except ImportError:
     pyperclip = None
 
-# 현재 경로를 sys.path에 추가하여 bill_splitter 임포트 지원
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-try:
-    from bill_splitter import Participant, Item, calculate_dutch_pay, format_results
-except ImportError:
-    # 예외 상황 대비 백업용 로컬 클래스 및 알고리즘 정의
-    class Participant:
-        def __init__(self, name, bank=None, account_number=None):
-            self.name = name
-            self.bank = bank
-            self.account_number = account_number
-        def __repr__(self):
-            account_str = f" ({self.bank} {self.account_number})" if self.bank and self.account_number else ""
-            return f"{self.name}{account_str}"
+selected_transfer = None
 
-    class Item:
-        def __init__(self, name, cost, payer_name, participant_names):
-            self.name = name
-            self.cost = cost
-            self.payer_name = payer_name
-            self.participant_names = list(participant_names)
-
-    def calculate_dutch_pay(participants_dict, items, rounding_unit=1):
-        balances = {name: 0.0 for name in participants_dict.keys()}
-        for item in items:
-            num_participants = len(item.participant_names)
-            if num_participants == 0:
-                continue
-            split_cost = item.cost / num_participants
-            balances[item.payer_name] += item.cost
-            for p_name in item.participant_names:
-                if p_name in balances:
-                    balances[p_name] -= split_cost
-
-        if rounding_unit > 1:
-            for name in balances:
-                balances[name] = round(balances[name])
-                balances[name] = (balances[name] // rounding_unit) * rounding_unit
-
-        creditors = []
-        debtors = []
-        for name, bal in balances.items():
-            if bal > 0.1:
-                creditors.append({"name": name, "balance": bal})
-            elif bal < -0.1:
-                debtors.append({"name": name, "balance": -bal})
-
-        creditors.sort(key=lambda x: x["balance"], reverse=True)
-        debtors.sort(key=lambda x: x["balance"], reverse=True)
-
-        transfers = []
-        c_idx, d_idx = 0, 0
-        while c_idx < len(creditors) and d_idx < len(debtors):
-            creditor = creditors[c_idx]
-            debtor = debtors[d_idx]
-            transfer_amount = min(debtor["balance"], creditor["balance"])
-            if rounding_unit > 1:
-                transfer_amount = (round(transfer_amount) // rounding_unit) * rounding_unit
-            if transfer_amount > 0:
-                transfers.append({
-                    "from": debtor["name"],
-                    "to": creditor["name"],
-                    "amount": transfer_amount
-                })
-            debtor["balance"] -= transfer_amount
-            creator_bal = creditor["balance"] - transfer_amount
-            creditor["balance"] = creator_bal
-            if debtor["balance"] < 0.1:
-                d_idx += 1
-            if creditor["balance"] < 0.1:
-                c_idx += 1
-        return balances, transfers
-
-    def format_results(participants_dict, items, transfers):
-        output = []
-        output.append("━" * 20)
-        output.append("📊 [정산 결과 공유] 📊")
-        output.append("━" * 20)
-        output.append("\n📝 [품목별 상세 내역]")
-        for i, item in enumerate(items, 1):
-            num_p = len(item.participant_names)
-            split_val = item.cost / num_p if num_p > 0 else 0
-            output.append(f"{i}. {item.name}: {item.cost:,.0f}원 (선결제: {item.payer_name})")
-            output.append(f"   └ 참여({num_p}명): {', '.join(item.participant_names)}")
-            output.append(f"   └ 1인당 금액: {split_val:,.0f}원")
-        output.append("\n💸 [송금 및 정산 내역]")
-        if not transfers:
-            output.append("이체할 내역이 없습니다. (정산 완료)")
-        else:
-            for t in transfers:
-                sender = t["from"]
-                receiver = t["to"]
-                amount = t["amount"]
-                receiver_obj = participants_dict[receiver]
-                account_info = ""
-                if receiver_obj.bank and receiver_obj.account_number:
-                    account_info = f" ({receiver_obj.bank} {receiver_obj.account_number})"
-                output.append(f"👉 {sender} ➔ {receiver}: {amount:,.0f}원{account_info}")
-        output.append("\n💡 빠르고 정확한 송금 부탁드립니다! 💡")
-        output.append("━" * 20)
-        return "\n".join(output)
-
-# ----------------- 앱 상태(State) -----------------
 state = {
-    "participants": [],  
-    "items": [],         
+    "participants": [],
+    "items": [],
     "item_counter": 0
 }
 
-# ----------------- EasyOCR 로드 및 전역 변수 설정 -----------------
-use_gpu = torch.cuda.is_available()
-print(f"GPU 가속 사용 여부: {use_gpu}")
-reader = easyocr.Reader(['ko', 'en'], gpu=use_gpu)
+class Participant:
+    def __init__(self, name, bank, account_number):
+        self.name = name
+        self.bank = bank
+        self.account_number = account_number
 
-# ----------------- 데이터 관리 함수 -----------------
-def load_receipt_ocr():
-    # 1단계 친구가 한 명도 없으면 결제자 지정이 불가능하므로 경고 안내
-    if not state["participants"]:
-        messagebox.showwarning("참여자 부족", "영수증을 스캔하기 전에 '1단계'에서 최소 1명 이상의 친구를 먼저 등록해 주세요!")
-        return
+class Item:
+    def __init__(self, name, cost, payer_name, participant_names):
+        self.name = name
+        self.cost = cost
+        self.payer_name = payer_name
+        self.participant_names = participant_names
 
-    image_path = filedialog.askopenfilename(
-        title="영수증 이미지 파일 선택",
-        filetypes=[("Image Files", "*.jpg;*.jpeg;*.png;*.bmp"), ("All Files", "*.*")]
-    )
+def calculate_dutch_pay(participants_dict, items_list, rounding_unit=10):
+    balances = {}
 
-    if not image_path or not os.path.exists(image_path):
-        return
+    for name in participants_dict:
+        balances[name] = 0
+
+    for item in items_list:
+        cost = item.cost
+        payer = item.payer_name
+        members = item.participant_names
+
+        if payer is None or payer == "":
+            continue
+
+        if payer not in balances:
+            continue
+
+        valid_members = []
+        for member in members:
+            if member in balances:
+                valid_members.append(member)
+
+        if len(valid_members) == 0:
+            continue
+
+        split_cost = cost / len(valid_members)
+
+        # 결제자는 낸 돈만큼 +
+        balances[payer] += cost
+
+        # 참여자는 자기 몫만큼 -
+        for member in valid_members:
+            balances[member] -= split_cost
+
+    if rounding_unit > 1:
+        for name in balances:
+            balances[name] = round(balances[name] / rounding_unit) * rounding_unit
+
+    transfers = calculate_min_transfers(balances)
+    return balances, transfers
+
+def create_toss_link(bank_name, account_number, send_amount):
+    if not bank_name or not account_number:
+        return None
+    encoded_bank = urllib.parse.quote(bank_name)
+    return f"toss://send?bank={encoded_bank}&account={account_number}&amount={int(send_amount)}"
+
+
+# =========================
+# OCR 영수증 인식 기능
+# =========================
+
+def recognize_receipt_image(image_path):
+    """
+    영수증 이미지에서 품목명/금액을 추출해서 parsed_data 리스트로 반환합니다.
+    필요한 설치:
+    pip install easyocr opencv-python pandas numpy torch
+    """
+    try:
+        import easyocr
+        import cv2
+        import numpy as np
+        import re
+        import torch
+    except ImportError as e:
+        messagebox.showerror(
+            "OCR 모듈 오류",
+            "OCR 기능에 필요한 모듈이 없습니다.\n\n"
+            "터미널에서 아래 명령어를 실행하세요.\n"
+            "pip install easyocr opencv-python pandas numpy torch\n\n"
+            f"오류 내용: {e}"
+        )
+        return []
+
+    use_gpu = torch.cuda.is_available()
+    reader = easyocr.Reader(['ko', 'en'], gpu=use_gpu)
 
     img_array = np.fromfile(image_path, np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
     if img is None:
-        messagebox.showerror("오류", "이미지를 불러오는 데 실패했습니다.")
-        return
+        messagebox.showerror("이미지 오류", "이미지를 불러올 수 없습니다.")
+        return []
 
     img_resized = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-
-    print("\n[OCR 분석 중...]")
     ocr_results = reader.readtext(img_resized)
 
     lines = []
@@ -169,22 +356,16 @@ def load_receipt_ocr():
         y_center = (box[0][1] + box[2][1]) / 2
         height = box[2][1] - box[0][1]
         x_start = box[0][0]
-        lines.append({
-            "text": text.strip(),
-            "y": y_center,
-            "h": height,
-            "x": x_start
-        })
+        lines.append({"text": text.strip(), "y": y_center, "h": height, "x": x_start})
 
     lines = sorted(lines, key=lambda x: x["y"])
-
     grouped_rows = []
+
     if lines:
         current_row = [lines[0]]
         for line in lines[1:]:
             ref_line = current_row[0]
             threshold = max(ref_line["h"], line["h"]) * 0.6
-
             if abs(line["y"] - ref_line["y"]) < threshold:
                 current_row.append(line)
             else:
@@ -192,24 +373,30 @@ def load_receipt_ocr():
                 current_row = [line]
         grouped_rows.append(current_row)
 
-    total_keywords = ["합계", "TOTAL", "총금액", "총액", "결제금액", "받을금액", "받은금액"]
-    exclude_keywords = [
-        "매장", "사업자", "주소", "대표", "번호", "전화", "TEL",
-        "일시", "부가세", "VAT", "과세", "면세", "거스름돈",
-        "승인", "고객", "안내", "영수증", "가맹점", "단가", "수량", "금액", "품명"
+    parsed_data = []
+    total_keywords = [
+        "합계", "TOTAL", "총금액", "총액", "결제금액",
+        "받을금액", "받은금액", "발물", "룹액", "발물룹액"
     ]
-
-    added_count = 0
-    # 1단계 목록의 첫 번째 사람을 영수증 기본 결제자로 스마트 지정
-    default_payer = state["participants"][0]["name"]
+    exclude_keywords = [
+        "매장", "매장명", "사업자", "주소", "대표", "번호", "전화",
+        "TEL", "일시", "부가세", "VAT", "과세", "면세", "거스름돈",
+        "승인", "고객", "안내", "원", "영수증", "가맹점"
+    ]
 
     for row in grouped_rows:
         sorted_row = sorted(row, key=lambda x: x["x"])
         row_text = " ".join([item["text"] for item in sorted_row])
-        check_text = row_text.replace(" ", "")
+        cleaned_text_for_check = row_text.replace(" ", "")
 
-        if any(k in check_text for k in total_keywords): continue
-        if any(k in check_text for k in exclude_keywords): continue
+        if any(k in cleaned_text_for_check for k in total_keywords):
+            continue
+
+        if any(k in cleaned_text_for_check for k in ["단가", "수량", "금액", "품명"]):
+            continue
+
+        if any(k in cleaned_text_for_check for k in exclude_keywords):
+            continue
 
         num_tokens = []
         name_tokens = []
@@ -218,14 +405,17 @@ def load_receipt_ocr():
             t_text = item["text"]
             digit_only = re.sub(r"[^0-9]", "", t_text)
 
-            if digit_only and len(num_tokens) < 3:
+            if digit_only and any(c.isdigit() for c in t_text) and len(num_tokens) < 3:
                 num_tokens.insert(0, int(digit_only))
             else:
                 name_tokens.insert(0, t_text)
 
         if name_tokens and num_tokens:
-            product_name = " ".join(name_tokens).strip()
-            product_name = re.sub(r"^[=\-_※\*\s\.\+~:★▶\[\]\(\)]+|[=\-_※\*\s\.\+~:★▶\[\]\(\)]+$", "", product_name)
+            product_name = re.sub(
+                r"^[=\-_※\*\s\.\+~:★▶\[\]\(\)]+|[=\-_※\*\s\.\+~:★▶\[\]\(\)]+$",
+                "",
+                " ".join(name_tokens)
+            ).strip()
 
             if not product_name or product_name.isdigit() or len(product_name) < 2:
                 continue
@@ -235,33 +425,100 @@ def load_receipt_ocr():
             elif len(num_tokens) == 2:
                 v1, v2 = num_tokens
                 if v1 < 100:
+                    quantity = v1
                     price = v2
+                    unit_price = price // quantity if quantity > 0 else 0
                 else:
+                    unit_price = v1
                     price = v2
+                    quantity = price // unit_price if unit_price > 0 else 1
             else:
                 price = num_tokens[0]
+                unit_price = price
+                quantity = 1
 
-            if price <= 0 or price > 10000000:
+            if quantity > 1000 or price > 10000000 or unit_price > 10000000:
                 continue
 
-            # 🚀 [핵심 수정] 추출한 품목을 앱 전체 State 시스템에 안전하게 보관!
-            state["item_counter"] += 1
-            state["items"].append({
-                "id": state["item_counter"],
-                "name": product_name,
-                "cost": price,
-                "payer_name": default_payer,
-                "participant_names": [p["name"] for p in state["participants"]] # 등록된 전원 참여 기본값
+            parsed_data.append({
+                "상품명": product_name,
+                "단가": unit_price,
+                "수량": quantity,
+                "금액": price
             })
-            added_count += 1
 
-    # 🚀 품목 진열 리스트박스 화면 실시간 새로고침 호출!
+    return parsed_data
+
+
+def add_ocr_items_gui():
+    if not state["participants"]:
+        messagebox.showwarning("데이터 부족", "OCR 품목을 넣기 전에 참여자를 먼저 등록하세요.")
+        return
+
+    payer = val_payer.get()
+    if payer == "선택" or not payer:
+        messagebox.showwarning("설정 오류", "OCR 품목의 결제자를 먼저 선택하세요.")
+        return
+
+    image_path = filedialog.askopenfilename(
+        title="영수증 이미지 파일 선택",
+        filetypes=[("Image Files", "*.jpg;*.jpeg;*.png;*.bmp"), ("All Files", "*.*")]
+    )
+
+    if not image_path:
+        return
+
+    text_area.delete("1.0", tk.END)
+    text_area.insert(tk.END, "OCR 인식 중입니다. 잠시만 기다려 주세요...\n")
+    root.update()
+
+    parsed_data = recognize_receipt_image(image_path)
+
+    if not parsed_data:
+        messagebox.showwarning("OCR 결과 없음", "추출된 품목이 없습니다. 이미지 선명도를 확인하세요.")
+        text_area.delete("1.0", tk.END)
+        text_area.insert(tk.END, "OCR 결과가 없습니다.")
+        return
+
+    selected_participants = []
+    for p_name, var in check_vars.items():
+        if var.get():
+            selected_participants.append(p_name)
+
+    if not selected_participants:
+        selected_participants = [p["name"] for p in state["participants"]]
+
+    added_count = 0
+
+    for row in parsed_data:
+        try:
+            item_name = str(row["상품명"]).strip()
+            cost = int(row["금액"])
+        except Exception:
+            continue
+
+        if not item_name or item_name == "합계 금액" or cost <= 0:
+            continue
+
+        state["item_counter"] += 1
+        state["items"].append({
+            "id": state["item_counter"],
+            "name": item_name,
+            "cost": cost,
+            "payer_name": payer,
+            "participant_names": list(selected_participants)
+        })
+        added_count += 1
+
     update_item_ui()
-    
-    if added_count > 0:
-        messagebox.showinfo("스캔 완료", f"영수증 인식 성공!\n총 {added_count}개의 품목이 하단 리스트에 진열되었습니다.\n(결제자 기본값: {default_payer})")
-    else:
-        messagebox.showwarning("인식 실패", "영수증에서 유효한 품목 정보를 추출하지 못했습니다.")
+
+    preview_lines = ["[OCR 인식 결과]"]
+    for row in parsed_data:
+        preview_lines.append(f"- {row['상품명']} : {row['금액']:,}원")
+
+    text_area.delete("1.0", tk.END)
+    text_area.insert(tk.END, "\n".join(preview_lines))
+    messagebox.showinfo("OCR 완료", f"영수증에서 {added_count}개 품목을 추가했습니다.")
 
 def delete_participant(name):
     state["participants"] = [p for p in state["participants"] if p["name"] != name]
@@ -269,7 +526,7 @@ def delete_participant(name):
         if name in item["participant_names"]:
             item["participant_names"].remove(name)
         if item["payer_name"] == name:
-            item["payer_name"] = ""  
+            item["payer_name"] = ""
     update_participant_ui()
     update_payer_dropdown()
     update_item_ui()
@@ -278,6 +535,38 @@ def delete_item(item_id):
     state["items"] = [item for item in state["items"] if item["id"] != item_id]
     update_item_ui()
 
+def refresh_item_listbox_only():
+    listbox_items.delete(0, tk.END)
+    for item in state["items"]:
+        listbox_items.insert(
+            tk.END,
+            f"[{item['id']}] {item['name']} ({item['cost']:,}원) / 결제: {item['payer_name']} / 참여: {len(item['participant_names'])}명"
+        )
+
+
+def set_item_participant(item_id, p_name, checked):
+    """품목 카드 안에서 참여자를 체크박스로 켜고 끄는 함수"""
+    for item in state["items"]:
+        if item["id"] == item_id:
+            if checked:
+                if p_name not in item["participant_names"]:
+                    item["participant_names"].append(p_name)
+            else:
+                if p_name in item["participant_names"]:
+                    item["participant_names"].remove(p_name)
+            break
+    refresh_item_listbox_only()
+
+
+def set_item_payer(item_id, payer_name):
+    """품목 카드 안에서 결제자를 바로 변경하는 함수"""
+    for item in state["items"]:
+        if item["id"] == item_id:
+            item["payer_name"] = payer_name
+            break
+    refresh_item_listbox_only()
+
+
 def toggle_item_participant(item_id, p_name):
     for item in state["items"]:
         if item["id"] == item_id:
@@ -285,16 +574,6 @@ def toggle_item_participant(item_id, p_name):
                 item["participant_names"].remove(p_name)
             else:
                 item["participant_names"].append(p_name)
-            break
-    update_item_ui()
-
-def change_item_payer(item_id, new_payer):
-    """품목별 결제자를 드롭다운에서 변경"""
-    if not new_payer or new_payer == "선택":
-        return
-    for item in state["items"]:
-        if item["id"] == item_id:
-            item["payer_name"] = new_payer
             break
     update_item_ui()
 
@@ -368,7 +647,9 @@ def add_item_gui():
     update_item_ui()
 
 def update_item_ui():
-    # 1) 품목 추가 영역의 기본 참여자 체크박스 갱신
+    refresh_item_listbox_only()
+
+    # 품목 추가 입력창의 기본 참여자 체크박스
     for widget in scroll_p_frame.winfo_children():
         widget.destroy()
 
@@ -388,75 +669,54 @@ def update_item_ui():
         )
         cb.pack(anchor="w", padx=10, pady=2)
 
-    # 2) 등록된 품목별 참여자 ON/OFF 카드 갱신
-    for widget in item_cards_frame.winfo_children():
+    # 품목 목록 + 결제자 변경 + 참여자 ON/OFF를 한 카드에 합친 영역
+    for widget in item_member_inner.winfo_children():
         widget.destroy()
 
     if not state["items"]:
-        empty = tk.Label(
-            item_cards_frame,
-            text="등록된 품목이 없습니다. 품목을 추가하거나 영수증을 불러오세요.",
+        tk.Label(
+            item_member_inner,
+            text="품목을 추가하면 여기서 결제자 변경과 참여자 ON/OFF를 바로 할 수 있습니다.",
+            bg="#ffffff",
+            fg="#64748b",
+            font=("Malgun Gothic", 9)
+        ).pack(anchor="w", padx=8, pady=6)
+        item_member_canvas.configure(scrollregion=item_member_canvas.bbox("all"))
+        return
+
+    participant_names = [p["name"] for p in state["participants"]]
+
+    for item in state["items"]:
+        card = tk.LabelFrame(
+            item_member_inner,
+            text=f"[{item['id']}] {item['name']} / {item['cost']:,}원",
+            bg="#ffffff",
+            fg="#0d9488",
+            font=("Malgun Gothic", 9, "bold"),
+            padx=8,
+            pady=6
+        )
+        card.pack(fill=tk.X, padx=6, pady=5)
+
+        top_row = tk.Frame(card, bg="#ffffff")
+        top_row.pack(fill=tk.X, pady=2)
+
+        tk.Label(
+            top_row,
+            text="결제자",
             bg="#ffffff",
             fg="#64748b",
             font=("Malgun Gothic", 9, "bold")
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        payer_var = tk.StringVar(value=item["payer_name"] if item["payer_name"] else "선택")
+        payer_menu = tk.OptionMenu(
+            top_row,
+            payer_var,
+            *participant_names,
+            command=lambda selected, item_id=item["id"]: set_item_payer(item_id, selected)
         )
-        empty.pack(fill=tk.X, padx=8, pady=10)
-        item_cards_canvas.configure(scrollregion=item_cards_canvas.bbox("all"))
-        return
-
-    for item in state["items"]:
-        item_id = item["id"]
-
-        card = tk.Frame(
-            item_cards_frame,
-            bg="#f8fafc",
-            highlightthickness=1,
-            highlightbackground="#cbd5e1",
-            padx=10,
-            pady=8
-        )
-        card.pack(fill=tk.X, padx=8, pady=6)
-
-        header = tk.Frame(card, bg="#f8fafc")
-        header.pack(fill=tk.X)
-
-        title_text = f"[{item_id}] {item['name']}  |  {item['cost']:,}원"
-        title = tk.Label(
-            header,
-            text=title_text,
-            bg="#f8fafc",
-            fg="#0f172a",
-            font=("Malgun Gothic", 9, "bold"),
-            anchor="w"
-        )
-        title.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        payer_row = tk.Frame(card, bg="#f8fafc")
-        payer_row.pack(fill=tk.X, pady=(6, 2))
-
-        tk.Label(
-            payer_row,
-            text="결제자 변경:",
-            bg="#f8fafc",
-            fg="#0369a1",
-            font=("Malgun Gothic", 8, "bold")
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-        item_payer_var = tk.StringVar(root)
-        valid_names = [p["name"] for p in state["participants"]]
-        current_payer = item.get("payer_name", "")
-        if current_payer not in valid_names:
-            current_payer = valid_names[0] if valid_names else "선택"
-            item["payer_name"] = current_payer if current_payer != "선택" else ""
-        item_payer_var.set(current_payer if current_payer else "선택")
-
-        payer_menu_item = tk.OptionMenu(
-            payer_row,
-            item_payer_var,
-            *(valid_names if valid_names else ["선택"]),
-            command=lambda value, iid=item_id: change_item_payer(iid, value)
-        )
-        payer_menu_item.config(
+        payer_menu.config(
             width=10,
             font=("Malgun Gothic", 8, "bold"),
             bg="#e0f2fe",
@@ -467,16 +727,19 @@ def update_item_ui():
             bd=0,
             highlightthickness=0
         )
-        payer_menu_item["menu"].config(
-            font=("Malgun Gothic", 8),
-            bg="#ffffff",
-            activebackground="#38bdf8",
-            activeforeground="#ffffff"
-        )
-        payer_menu_item.pack(side=tk.LEFT)
+        payer_menu["menu"].config(font=("Malgun Gothic", 8))
+        payer_menu.pack(side=tk.LEFT, padx=4)
 
-        del_btn = tk.Button(
-            header,
+        tk.Label(
+            top_row,
+            text=f"참여 {len(item['participant_names'])}명",
+            bg="#ffffff",
+            fg="#0f766e",
+            font=("Malgun Gothic", 9, "bold")
+        ).pack(side=tk.LEFT, padx=12)
+
+        delete_btn = tk.Button(
+            top_row,
             text="삭제",
             bg="#fee2e2",
             fg="#ef4444",
@@ -484,50 +747,39 @@ def update_item_ui():
             font=("Malgun Gothic", 8, "bold"),
             bd=0,
             relief=tk.FLAT,
-            cursor="hand2",
-            command=lambda iid=item_id: delete_item(iid)
+            padx=8,
+            pady=2,
+            command=lambda item_id=item["id"]: delete_item(item_id)
         )
-        del_btn.pack(side=tk.RIGHT, padx=4)
+        delete_btn.pack(side=tk.RIGHT, padx=4)
 
-        count_label = tk.Label(
-            card,
-            text=f"참여자 {len(item['participant_names'])}명: {', '.join(item['participant_names']) if item['participant_names'] else '없음'}",
-            bg="#f8fafc",
+        members_row = tk.Frame(card, bg="#ffffff")
+        members_row.pack(fill=tk.X, pady=3)
+
+        tk.Label(
+            members_row,
+            text="먹은 사람",
+            bg="#ffffff",
             fg="#64748b",
-            font=("Malgun Gothic", 8),
-            anchor="w"
-        )
-        count_label.pack(fill=tk.X, pady=(4, 6))
+            font=("Malgun Gothic", 9, "bold")
+        ).pack(side=tk.LEFT, padx=(0, 5))
 
-        btn_frame = tk.Frame(card, bg="#f8fafc")
-        btn_frame.pack(fill=tk.X)
-
-        for idx, p in enumerate(state["participants"]):
+        for p in state["participants"]:
             p_name = p["name"]
-            is_on = p_name in item["participant_names"]
-
-            btn = tk.Button(
-                btn_frame,
-                text=(f"✅ {p_name}" if is_on else f"⬜ {p_name}"),
-                bg=("#38bdf8" if is_on else "#e2e8f0"),
-                fg=("white" if is_on else "#64748b"),
-                activebackground=("#0ea5e9" if is_on else "#cbd5e1"),
-                activeforeground=("white" if is_on else "#334155"),
-                font=("Malgun Gothic", 8, "bold"),
-                bd=0,
-                relief=tk.FLAT,
-                cursor="hand2",
-                padx=6,
-                pady=4,
-                command=lambda iid=item_id, name=p_name: toggle_item_participant(iid, name)
+            var = tk.BooleanVar(value=(p_name in item["participant_names"]))
+            cb = tk.Checkbutton(
+                members_row,
+                text=p_name,
+                variable=var,
+                bg="#ffffff",
+                activebackground="#ffffff",
+                fg="#334155",
+                font=("Malgun Gothic", 9),
+                command=lambda item_id=item["id"], name=p_name, v=var: set_item_participant(item_id, name, v.get())
             )
-            btn.grid(row=idx // 3, column=idx % 3, padx=3, pady=3, sticky="ew")
+            cb.pack(side=tk.LEFT, padx=3, pady=2)
 
-        for col in range(3):
-            btn_frame.columnconfigure(col, weight=1)
-
-    item_cards_frame.update_idletasks()
-    item_cards_canvas.configure(scrollregion=item_cards_canvas.bbox("all"))
+    item_member_canvas.configure(scrollregion=item_member_canvas.bbox("all"))
 
 def delete_selected_participant():
     try:
@@ -538,7 +790,12 @@ def delete_selected_participant():
         messagebox.showwarning("선택 오류", "삭제할 참여자를 목록에서 선택하세요.")
 
 def delete_selected_item():
-    messagebox.showinfo("안내", "품목 삭제는 각 품목 카드 오른쪽의 '삭제' 버튼을 눌러 주세요.")
+    try:
+        idx = listbox_items.curselection()[0]
+        item_id = state["items"][idx]["id"]
+        delete_item(item_id)
+    except IndexError:
+        messagebox.showwarning("선택 오류", "삭제할 품목을 목록에서 선택하세요.")
 
 def generate_output():
     if not state["participants"]:
@@ -547,14 +804,12 @@ def generate_output():
     if not state["items"]:
         messagebox.showwarning("데이터 부족", "품목을 등록해 주세요.")
         return
-    for item in state["items"]:
-        if not item["payer_name"]:
-            messagebox.showwarning("설정 미비", f"'{item['name']}' 품목의 결제자가 지정되지 않았습니다.")
-            return
-
     participants_dict = {p["name"]: Participant(p["name"], p["bank"], p["account"]) for p in state["participants"]}
     items_list = [Item(item["name"], item["cost"], item["payer_name"], item["participant_names"]) for item in state["items"]]
     _, transfers = calculate_dutch_pay(participants_dict, items_list, rounding_unit=10)
+    
+    global selected_transfer
+    selected_transfer = transfers[0] if transfers else None
     
     kakao_output = []
     kakao_output.append("📢 [모임 정산 알림]")
@@ -565,8 +820,8 @@ def generate_output():
         num_p = len(item.participant_names)
         split_val = item.cost / num_p if num_p > 0 else 0
         kakao_output.append(f"{i}. {item.name}: {item.cost:,.0f}원 (결제자: {item.payer_name})")
-        kakao_output.append(f"    └ 참여인원: {num_p}명 ({', '.join(item.participant_names)})")
-        kakao_output.append(f"    └ 1인당 금액: {split_val:,.0f}원")
+        kakao_output.append(f"   └ 참여인원: {num_p}명 ({', '.join(item.participant_names)})")
+        kakao_output.append(f"   └ 1인당 금액: {split_val:,.0f}원")
     kakao_output.append("\n💸 [송금 내역]")
     if not transfers:
         kakao_output.append("이체할 내역이 없습니다. 정산이 완벽히 맞습니다.")
@@ -580,14 +835,13 @@ def generate_output():
             toss_url_msg = ""
             if receiver_obj.bank and receiver_obj.account_number:
                 account_info = f" ({receiver_obj.bank} {receiver_obj.account_number})"
-                # 토스 앱 범용 커스텀 스키마 링크 생성 적용
-                encoded_bank = urllib.parse.quote(receiver_obj.bank)
-                toss_link = f"toss://send?bank={encoded_bank}&account={receiver_obj.account_number}&amount={int(amount)}"
-                toss_url_msg = f"\n    ⚡ [터치 시 토스 자동 송금]: {toss_link}"
+                toss_link = create_toss_link(receiver_obj.bank, receiver_obj.account_number, amount)
+                if toss_link:
+                    toss_url_msg = f"\n   ⚡ [터치 시 토스 자동 송금]: {toss_link}"
             else:
-                toss_url_msg = f"\n    ⚠️ 계좌 정보가 등록되지 않았습니다."
+                toss_url_msg = f"\n   ⚠️ 계좌 정보가 등록되지 않았습니다."
             kakao_output.append(f"{idx}. {sender} ➔ {receiver}: {amount:,.0f}원{account_info}{toss_url_msg}")
-            kakao_output.append("    -----------------------------------------")  
+            kakao_output.append("   -----------------------------------------")  
     kakao_output.append("\n💡 토스 링크를 누르면 금액과 계좌가 앱에 자동으로 입력됩니다.")
     kakao_output.append("━" * 35)
     final_text = "\n".join(kakao_output)
@@ -600,74 +854,78 @@ def generate_output():
             messagebox.showinfo("복사 완료", "정산서가 클립보드에 복사되었습니다! 카톡방에 붙여넣기 하세요.")
         except Exception:
             pass
+def copy_account():
+    global selected_transfer
 
-
-
-def copy_transfer_info_only():
-    """정산 결과 중 송금해야 할 금액과 받는 사람 계좌만 클립보드에 복사"""
-    if not state["participants"]:
-        messagebox.showwarning("데이터 부족", "참여자를 먼저 등록해 주세요.")
-        return
-    if not state["items"]:
-        messagebox.showwarning("데이터 부족", "품목을 먼저 등록해 주세요.")
+    if not selected_transfer:
+        messagebox.showwarning("복사 실패", "송금 내역이 없습니다.")
         return
 
-    for item in state["items"]:
-        if not item.get("payer_name"):
-            messagebox.showwarning("설정 미비", f"'{item['name']}' 품목의 결제자가 지정되지 않았습니다.")
-            return
-        if not item.get("participant_names"):
-            messagebox.showwarning("설정 미비", f"'{item['name']}' 품목에 참여자가 없습니다.")
-            return
+    receiver_name = selected_transfer["to"]
 
-    participants_dict = {
-        p["name"]: Participant(p["name"], p.get("bank", ""), p.get("account", ""))
-        for p in state["participants"]
-    }
-    items_list = [
-        Item(item["name"], item["cost"], item["payer_name"], item["participant_names"])
-        for item in state["items"]
-    ]
-    _, transfers = calculate_dutch_pay(participants_dict, items_list, rounding_unit=10)
+    receiver = next(
+        p for p in state["participants"]
+        if p["name"] == receiver_name
+    )
 
-    if not transfers:
-        copy_text = "이체할 내역이 없습니다. 정산 완료!"
-    else:
-        lines = ["💸 송금 내역"]
-        for idx, t in enumerate(transfers, 1):
-            sender = t["from"]
-            receiver = t["to"]
-            amount = int(t["amount"])
-            receiver_obj = participants_dict[receiver]
+    text = f"{receiver['bank']} {receiver['account']}"
 
-            if receiver_obj.bank and receiver_obj.account_number:
-                account_info = f"{receiver_obj.bank} {receiver_obj.account_number}"
-            else:
-                account_info = "계좌 정보 미등록"
+    root.clipboard_clear()
+    root.clipboard_append(text)
 
-            lines.append(f"{idx}. {sender} → {receiver}: {amount:,}원 / {account_info}")
-        copy_text = "\n".join(lines)
+    messagebox.showinfo("복사 완료", text)
 
-    try:
-        root.clipboard_clear()
-        root.clipboard_append(copy_text)
-        root.update()
-        messagebox.showinfo("복사 완료", "송금 금액과 계좌 정보를 클립보드에 복사했습니다.")
-    except Exception as e:
-        messagebox.showerror("복사 실패", f"클립보드 복사 중 오류가 발생했습니다:\n{e}")
 
-# ----------------- UI 레이아웃 빌드 -----------------
+def copy_amount():
+    global selected_transfer
+
+    if not selected_transfer:
+        messagebox.showwarning("복사 실패", "송금 내역이 없습니다.")
+        return
+
+    text = str(selected_transfer["amount"])
+
+    root.clipboard_clear()
+    root.clipboard_append(text)
+
+    messagebox.showinfo("복사 완료", f"{text}원")
+
+
+def copy_account_amount():
+    global selected_transfer
+
+    if not selected_transfer:
+        messagebox.showwarning("복사 실패", "송금 내역이 없습니다.")
+        return
+
+    receiver_name = selected_transfer["to"]
+
+    receiver = next(
+        p for p in state["participants"]
+        if p["name"] == receiver_name
+    )
+
+    text = (
+        f"{receiver['bank']} "
+        f"{receiver['account']}\n"
+        f"{selected_transfer['amount']}원"
+    )
+
+    root.clipboard_clear()
+    root.clipboard_append(text)
+
+    messagebox.showinfo("복사 완료", text)
+
 root = tk.Tk()
-root.title("💸더치메이트 (Dutch Mate)")
-root.geometry("1180x820")
-root.minsize(1080, 760)
+root.title("더치메이트")
+root.geometry("1250x900")
 root.configure(bg="#e0f2fe")
 
 check_vars = {}
 
 left_panel = tk.Frame(root, bg="#e0f2fe", width=560)
 left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=25, pady=20)
-right_panel = tk.Frame(root, bg="#e0f2fe", width=560)
+right_panel = tk.Frame(root, bg="#e0f2fe", width=620)
 right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=25, pady=20)
 
 p_input_frame = tk.LabelFrame(left_panel, text=" ✨ 1단계. 친구들 등록하기 ", font=("Malgun Gothic", 11, "bold"), bg="#ffffff", fg="#0369a1", bd=0, relief=tk.FLAT, padx=18, pady=18)
@@ -690,10 +948,11 @@ tk.Label(p_input_frame, text="계좌번호", font=("Malgun Gothic", 10, "bold"),
 entry_p_account = tk.Entry(p_input_frame, width=22, font=("Malgun Gothic", 10, "bold"), bd=1, relief=tk.SOLID, highlightthickness=0, fg="#334155")
 entry_p_account.grid(row=1, column=1, columnspan=2, sticky="w", padx=6, pady=6, ipady=4)
 
-btn_add_p = tk.Button(p_input_frame, text="멤버 추가 ➕", bg="#38bdf8", fg="white", activebackground="#0ea5e9", activeforeground="white", font=("Malgun Gothic", 9, "bold"), width=10, bd=0, relief=tk.FLAT, cursor="hand2", pady=5, command=add_participant_gui)
+btn_add_p = tk.Button(p_input_frame, text="멤버 추가 ➕", bg="#38bdf8", fg="white", activebackground="#0ea5e9", activeforeground="white", font=("Malgun Gothic", 9, "bold"), width=10, bd=0, relief=tk.FLAT, cursor="hand2", pady=5)
 btn_add_p.grid(row=1, column=3, sticky="e", padx=6, pady=6)
+btn_add_p.config(command=add_participant_gui)
 
-listbox_participants = tk.Listbox(left_panel, height=5, borderwidth=1, relief=tk.SOLID, font=("Malgun Gothic", 10), bg="#ffffff", fg="#334155", selectbackground="#e0f2fe", selectforeground="#0369a1", highlightthickness=0)
+listbox_participants = tk.Listbox(left_panel, height=6, borderwidth=1, relief=tk.SOLID, font=("Malgun Gothic", 10), bg="#ffffff", fg="#334155", selectbackground="#e0f2fe", selectforeground="#0369a1", highlightthickness=0)
 listbox_participants.pack(fill=tk.X, pady=2)
 
 btn_del_p = tk.Button(left_panel, text="선택 삭제 🗑️", bg="#fee2e2", fg="#ef4444", activebackground="#fca5a5", font=("Malgun Gothic", 8, "bold"), bd=0, relief=tk.FLAT, command=delete_selected_participant, padx=12, pady=5)
@@ -735,82 +994,96 @@ scroll_p_frame.bind("<Configure>", on_frame_configure)
 i_input_frame.grid_rowconfigure(3, weight=1)
 i_input_frame.grid_columnconfigure(1, weight=1)
 
-btn_add_i = tk.Button(i_input_frame, text="품목 추가 🧾", bg="#2dd4bf", fg="white", activebackground="#14b8a6", activeforeground="white", font=("Malgun Gothic", 9, "bold"), width=11, bd=0, relief=tk.FLAT, cursor="hand2", pady=5, command=add_item_gui)
+btn_add_i = tk.Button(i_input_frame, text="품목 추가 🧾", bg="#2dd4bf", fg="white", activebackground="#14b8a6", activeforeground="white", font=("Malgun Gothic", 9, "bold"), width=11, bd=0, relief=tk.FLAT, cursor="hand2", pady=5)
 btn_add_i.grid(row=4, column=3, sticky="e", padx=6, pady=8)
+btn_add_i.config(command=add_item_gui)
 
-# 🚀 [조원분 연동 구조 매핑] 스캔 연동 함수명을 안전하게 매핑 및 창 중복 에러 해결
-btn_receipt = tk.Button(
-    i_input_frame,
-    text="📷 영수증 불러오기",
-    bg="#8b5cf6",
-    fg="white",
-    activebackground="#7c3aed",
-    activeforeground="white",
-    font=("Malgun Gothic", 9, "bold"),
-    width=14,
-    bd=0,
-    relief=tk.FLAT,
-    cursor="hand2",
-    pady=5,
-    command=load_receipt_ocr
-)
-btn_receipt.grid(row=4, column=0, columnspan=2, sticky="w", padx=6, pady=8)
+btn_ocr_i = tk.Button(i_input_frame, text="영수증 OCR 추가 📷", bg="#818cf8", fg="white", activebackground="#6366f1", activeforeground="white", font=("Malgun Gothic", 9, "bold"), width=14, bd=0, relief=tk.FLAT, cursor="hand2", pady=5, command=add_ocr_items_gui)
+btn_ocr_i.grid(row=4, column=0, columnspan=2, sticky="w", padx=6, pady=8)
 
-item_list_frame = tk.LabelFrame(
-    left_panel,
-    text=" 🍽️ 3단계. 품목별 참여자 ON/OFF ",
-    font=("Malgun Gothic", 10, "bold"),
-    bg="#ffffff",
-    fg="#0369a1",
-    bd=0,
-    relief=tk.FLAT,
-    padx=10,
-    pady=10
-)
-item_list_frame.pack(fill=tk.BOTH, expand=True, pady=8)
+# 내부 데이터 갱신용 listbox입니다. 화면에는 따로 표시하지 않고, 아래 품목 카드 영역에 합쳐서 보여줍니다.
+listbox_items = tk.Listbox(left_panel, height=1)
 
-item_cards_canvas = tk.Canvas(item_list_frame, borderwidth=0, bg="#ffffff", highlightthickness=0, height=190)
-item_cards_scrollbar = tk.Scrollbar(item_list_frame, orient="vertical", command=item_cards_canvas.yview)
-item_cards_canvas.configure(yscrollcommand=item_cards_scrollbar.set)
+item_member_box = tk.LabelFrame(left_panel, text=" ✅ 추가된 품목 관리 / 결제자 변경 / 참여자 ON-OFF ", font=("Malgun Gothic", 10, "bold"), bg="#ffffff", fg="#0d9488", bd=0, relief=tk.FLAT, padx=8, pady=8)
+item_member_box.pack(fill=tk.BOTH, expand=True, pady=5)
 
-item_cards_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-item_cards_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+item_member_canvas = tk.Canvas(item_member_box, borderwidth=0, bg="#ffffff", height=280, highlightthickness=0)
+item_member_inner = tk.Frame(item_member_canvas, bg="#ffffff")
+item_member_scrollbar = tk.Scrollbar(item_member_box, orient="vertical", command=item_member_canvas.yview)
+item_member_canvas.configure(yscrollcommand=item_member_scrollbar.set)
+item_member_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+item_member_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+item_member_canvas.create_window((0, 0), window=item_member_inner, anchor="nw")
 
-item_cards_frame = tk.Frame(item_cards_canvas, bg="#ffffff")
-item_cards_window = item_cards_canvas.create_window((0, 0), window=item_cards_frame, anchor="nw")
-
-def on_item_cards_configure(event):
-    item_cards_canvas.configure(scrollregion=item_cards_canvas.bbox("all"))
-
-def on_item_canvas_configure(event):
-    item_cards_canvas.itemconfig(item_cards_window, width=event.width)
-
-item_cards_frame.bind("<Configure>", on_item_cards_configure)
-item_cards_canvas.bind("<Configure>", on_item_canvas_configure)
+def on_item_member_configure(event):
+    item_member_canvas.configure(scrollregion=item_member_canvas.bbox("all"))
+item_member_inner.bind("<Configure>", on_item_member_configure)
 
 btn_calc = tk.Button(right_panel, text="💬 카카오톡 정산서 만들고 복사하기", font=("Malgun Gothic", 12, "bold"), bg="#FEE500", fg="#191919", activebackground="#FADA0A", bd=0, relief=tk.FLAT, pady=18, cursor="hand2")
-btn_calc.pack(fill=tk.X, pady=(5, 6))
+btn_calc.pack(fill=tk.X, pady=5)
 
-btn_copy_accounts = tk.Button(
+copy_frame = tk.Frame(
     right_panel,
-    text="💸 보낼 금액 + 계좌 복사하기",
-    font=("Malgun Gothic", 10, "bold"),
-    bg="#dbeafe",
-    fg="#1d4ed8",
-    activebackground="#bfdbfe",
-    activeforeground="#1e40af",
-    bd=0,
-    relief=tk.FLAT,
-    pady=12,
-    cursor="hand2",
-    command=copy_transfer_info_only
+    bg="#e0f2fe"
 )
-btn_copy_accounts.pack(fill=tk.X, pady=(0, 8))
+
+copy_frame.pack(
+    fill=tk.X,
+    pady=5
+)
+
+btn_copy_account = tk.Button(
+    copy_frame,
+    text="🏦 계좌 복사",
+    command=copy_account,
+    bg="#38bdf8",
+    fg="white",
+    font=("Malgun Gothic", 9, "bold")
+)
+
+btn_copy_account.pack(
+    side=tk.LEFT,
+    expand=True,
+    fill=tk.X,
+    padx=3
+)
+
+btn_copy_amount = tk.Button(
+    copy_frame,
+    text="💸 금액 복사",
+    command=copy_amount,
+    bg="#22c55e",
+    fg="white",
+    font=("Malgun Gothic", 9, "bold")
+)
+
+btn_copy_amount.pack(
+    side=tk.LEFT,
+    expand=True,
+    fill=tk.X,
+    padx=3
+)
+
+btn_copy_all = tk.Button(
+    copy_frame,
+    text="📋 계좌+금액 복사",
+    command=copy_account_amount,
+    bg="#f59e0b",
+    fg="white",
+    font=("Malgun Gothic", 9, "bold")
+)
+
+btn_copy_all.pack(
+    side=tk.LEFT,
+    expand=True,
+    fill=tk.X,
+    padx=3
+)
 
 result_frame = tk.LabelFrame(right_panel, text=" 📱 정산 결과 미리보기 ", font=("Malgun Gothic", 11, "bold"), bg="#ffffff", fg="#0369a1", bd=0, relief=tk.FLAT, padx=18, pady=18)
 result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
-text_area = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, font=("Malgun Gothic", 10, "bold"), bg="#ffffff", fg="#334155", borderwidth=0, highlightthickness=1, highlightbackground="#e2e8f0", highlightcolor="#38bdf8")
+text_area = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, font=("Malgun Gothic", 11, "bold"), bg="#ffffff", fg="#334155", borderwidth=0, highlightthickness=1, highlightbackground="#e2e8f0", highlightcolor="#38bdf8")
 text_area.pack(fill=tk.BOTH, expand=True)
 text_area.insert(tk.END, "왼쪽에서 실전 데이터를 등록한 뒤 정산서 생성 버튼을 누르세요.")
 
@@ -826,8 +1099,5 @@ def safe_clipboard_copy():
         print(f"클립보드 복사 내부 오류 발생: {e}")
 
 root.after(100, lambda: btn_calc.config(command=lambda: [generate_output(), safe_clipboard_copy()]))
-
-# 초기 화면 갱신
-update_item_ui()
 
 root.mainloop()
