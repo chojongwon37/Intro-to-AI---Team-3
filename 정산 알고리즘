@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📊 N빵 정산 계산기 (Dutch Pay Splitter) - GUI 버전
+📊 N빵 정산 계산기 (Dutch Pay Splitter)
 """
 
 import sys
