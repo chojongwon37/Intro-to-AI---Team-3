@@ -1,0 +1,229 @@
+# -*- coding: utf-8 -*-
+"""
+더치메이트 정산 알고리즘 파트
+담당: 정산 알고리즘 / 최소 송금 횟수 계산
+"""
+
+
+# =========================
+# 데이터 클래스
+# =========================
+
+class Participant:
+    def __init__(self, name, bank=None, account_number=None):
+        self.name = name
+        self.bank = bank
+        self.account_number = account_number
+
+    def __repr__(self):
+        account_info = ""
+        if self.bank and self.account_number:
+            account_info = f" ({self.bank} {self.account_number})"
+        return f"{self.name}{account_info}"
+
+
+class Item:
+    def __init__(self, name, cost, payer_name, participant_names):
+        self.name = name
+        self.cost = cost
+        self.payer_name = payer_name
+        self.participant_names = list(participant_names)
+
+
+# =========================
+# 참여자 관리
+# =========================
+
+def add_participant(participants_dict, name, bank=None, account_number=None):
+    if name in participants_dict:
+        return False
+
+    participants_dict[name] = Participant(name, bank, account_number)
+    return True
+
+
+def delete_participant(participants_dict, items_list, name):
+    if name not in participants_dict:
+        return False
+
+    del participants_dict[name]
+
+    for item in items_list:
+        if name in item.participant_names:
+            item.participant_names.remove(name)
+
+        if item.payer_name == name:
+            item.payer_name = None
+
+    return True
+
+
+# =========================
+# 품목 관리
+# =========================
+
+def add_item(items_list, name, cost, payer_name, participant_names):
+    item = Item(name, cost, payer_name, participant_names)
+    items_list.append(item)
+    return True
+
+
+def delete_item(items_list, index):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list.pop(index)
+    return True
+
+
+def update_item_price(items_list, index, new_cost):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].cost = new_cost
+    return True
+
+
+def update_item_payer(items_list, index, new_payer_name):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].payer_name = new_payer_name
+    return True
+
+
+def update_item_participants(items_list, index, new_participant_names):
+    if index < 0 or index >= len(items_list):
+        return False
+
+    items_list[index].participant_names = list(new_participant_names)
+    return True
+
+
+# =========================
+# 정산 계산 알고리즘
+# =========================
+
+def calculate_dutch_pay(participants_dict, items_list, rounding_unit=10):
+    balances = {}
+
+    for name in participants_dict:
+        balances[name] = 0
+
+    for item in items_list:
+        cost = item.cost
+        payer = item.payer_name
+        members = item.participant_names
+
+        if payer is None:
+            continue
+
+        if payer not in balances:
+            continue
+
+        valid_members = []
+
+        for member in members:
+            if member in balances:
+                valid_members.append(member)
+
+        if len(valid_members) == 0:
+            continue
+
+        split_cost = cost / len(valid_members)
+
+        balances[payer] += cost
+
+        for member in valid_members:
+            balances[member] -= split_cost
+
+    if rounding_unit > 1:
+        for name in balances:
+            balances[name] = round(balances[name] / rounding_unit) * rounding_unit
+
+    transfers = calculate_min_transfers(balances)
+
+    return balances, transfers
+
+
+# =========================
+# 최소 송금 횟수 계산
+# =========================
+
+def calculate_min_transfers(balances):
+    debtors = []
+    creditors = []
+
+    for name, balance in balances.items():
+        if balance < 0:
+            debtors.append([name, -balance])
+        elif balance > 0:
+            creditors.append([name, balance])
+
+    transfers = []
+
+    i = 0
+    j = 0
+
+    while i < len(debtors) and j < len(creditors):
+        debtor_name, debt_amount = debtors[i]
+        creditor_name, credit_amount = creditors[j]
+
+        send_amount = min(debt_amount, credit_amount)
+
+        transfers.append({
+            "from": debtor_name,
+            "to": creditor_name,
+            "amount": int(send_amount)
+        })
+
+        debtors[i][1] -= send_amount
+        creditors[j][1] -= send_amount
+
+        if debtors[i][1] <= 0:
+            i += 1
+
+        if creditors[j][1] <= 0:
+            j += 1
+
+    return transfers
+
+
+# =========================
+# 결과 출력용 함수
+# =========================
+
+def format_results(participants_dict, balances, transfers):
+    result = ""
+
+    result += "개인별 정산 결과\n"
+    result += "--------------------\n"
+
+    for name, balance in balances.items():
+        if balance > 0:
+            result += f"{name}: {int(balance)}원 받아야 함\n"
+        elif balance < 0:
+            result += f"{name}: {int(abs(balance))}원 보내야 함\n"
+        else:
+            result += f"{name}: 정산 완료\n"
+
+    result += "\n송금 내역\n"
+    result += "--------------------\n"
+
+    if not transfers:
+        result += "송금할 내역이 없습니다.\n"
+    else:
+        for transfer in transfers:
+            sender = transfer["from"]
+            receiver = transfer["to"]
+            amount = transfer["amount"]
+
+            receiver_info = participants_dict.get(receiver)
+
+            if receiver_info and receiver_info.bank and receiver_info.account_number:
+                result += f"{sender} → {receiver}: {amount}원 "
+                result += f"({receiver_info.bank} {receiver_info.account_number})\n"
+            else:
+                result += f"{sender} → {receiver}: {amount}원\n"
+
+    return result
