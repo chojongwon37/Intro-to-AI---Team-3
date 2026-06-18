@@ -1,0 +1,103 @@
+participants = {}
+items = []
+
+
+def add_participant(name, bank="", account=""):
+    participants[name] = {
+        "name": name,
+        "bank": bank,
+        "account": account
+    }
+
+
+def delete_participant(name):
+    if name not in participants:
+        return
+
+    del participants[name]
+
+    for item in items:
+        if name in item["members"]:
+            item["members"].remove(name)
+
+        if item["payer"] == name:
+            item["payer"] = None
+
+
+def add_item(item_name, price, payer, members):
+    items.append({
+        "name": item_name,
+        "price": price,
+        "payer": payer,
+        "members": members
+    })
+
+
+def delete_item(index):
+    if 0 <= index < len(items):
+        items.pop(index)
+
+
+def calculate_settlement():
+    balances = {}
+
+    for name in participants:
+        balances[name] = 0
+
+    for item in items:
+        price = item["price"]
+        payer = item["payer"]
+        members = item["members"]
+
+        if payer is None or len(members) == 0:
+            continue
+
+        split_price = price / len(members)
+
+        balances[payer] += price
+
+        for member in members:
+            balances[member] -= split_price
+
+    return balances
+
+
+def calculate_transfers():
+    balances = calculate_settlement()
+
+    debtors = []
+    creditors = []
+
+    for name, balance in balances.items():
+        if balance < 0:
+            debtors.append([name, -balance])
+        elif balance > 0:
+            creditors.append([name, balance])
+
+    transfers = []
+
+    i = 0
+    j = 0
+
+    while i < len(debtors) and j < len(creditors):
+        debtor_name, debt = debtors[i]
+        creditor_name, credit = creditors[j]
+
+        amount = min(debt, credit)
+
+        transfers.append({
+            "from": debtor_name,
+            "to": creditor_name,
+            "amount": round(amount)
+        })
+
+        debtors[i][1] -= amount
+        creditors[j][1] -= amount
+
+        if debtors[i][1] == 0:
+            i += 1
+
+        if creditors[j][1] == 0:
+            j += 1
+
+    return transfers
