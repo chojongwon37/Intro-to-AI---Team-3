@@ -1,3 +1,10 @@
+#터미널 창에 입력
+pip install easyocr opencv-python pandas numpy
+--------------------
+#터미널 창에 입력
+pip install openpyxl
+--------------------
+
 import sys
 import os
 import easyocr
