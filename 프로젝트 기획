@@ -1,0 +1,46 @@
+#터미널 창에 입력
+pip install easyocr opencv-python pandas numpy
+--------------------
+#터미널 창에 입력
+pip install openpyxl
+
+## 프로젝트명
+더치메이트(DutchMate)
+
+## 프로젝트 소개
+더치메이트(DutchMate)는 모임, 회식, 여행 등에서 발생하는 비용을 쉽고 정확하게 정산할 수 있도록 도와주는 정산 프로그램입니다.
+
+## 주요 기능
+-참여자 등록 및 삭제
+-은행 및 계좌번호 관리
+-품목 등록 및 삭제
+-품목별 결제자 지정
+-품목별 참여자 선택(ON/OFF)
+-정산 금액 자동 계산
+-최소 송금 횟수 계산
+-OCR 영수증 인식
+-카카오톡 공유용 정산서 생성
+-계좌 및 금액 복사 기능
+
+## 사용 기술
+- Python
+- Tkinter
+- EasyOCR
+- OpenCV
+- NumPy
+- Pyperclip
+
+## 팀원 역할
+- 고건우: QCR 알고리즘(영수증 추가 기능)
+- 김동훈: UI 제작 및 정산 내역 복사 기능
+- 최종원: 정산 알고리즘 및 프로젝트 정리
+
+## 실행 방법
+버추얼 스튜디오 파이썬 3.12버전 기준
+#터미널 창에 입력
+pip install easyocr opencv-python pandas numpy
+--------------------
+#터미널 창에 입력
+pip install openpyxl
+
+후 실행
